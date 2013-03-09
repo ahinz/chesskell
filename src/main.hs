@@ -1,70 +1,63 @@
 -- Main file
 import Char
+import Control.Applicative
+import Data.Maybe
+import Data.List
 
-data Color = Black | White
-data PieceType = Knight | Rook | Bishop | Pawn | Queen | King
-data Piece = Piece Color PieceType | Empty
+type Position = (Int,Int)
 
-instance Show Color where
-  show Black = "b"
-  show White = "w"
-
-instance Show PieceType where
-  show Knight = "N"
-  show Rook = "R"
-  show Bishop = "B"
-  show Pawn = "P"
-  show Queen = "Q"
-  show King = "K"
+data Color = Black | White deriving (Show,Eq)
+data PieceType = Knight | Rook | Bishop | Pawn | Queen | King deriving (Show,Eq)
+data Piece = Piece Color PieceType deriving (Eq)
+data PositionedPiece = PositionedPiece Position Piece deriving (Show,Eq)
 
 instance Show Piece where
-  show (Piece c t) = (show c) ++ (show t)
-  show Empty = "  "
+  show (Piece Black Knight) = "n"
+  show (Piece Black Rook) = "r"
+  show (Piece Black Bishop) = "b"
+  show (Piece Black Pawn) = "p"
+  show (Piece Black Queen) = "q"
+  show (Piece Black King) = "k"
+  show (Piece White p) = map toUpper $ show (Piece Black p)
 
-type Board = [[Piece]]
-type Position = (Int, Int)
+type Board = [PositionedPiece]
 
-parsePosition :: String -> (Int, Int)
-parsePosition (files:ranks:[]) = (file,rank)
-                                 where file = ord files - 97
-                                       rank = ord ranks - 49
+pos :: PositionedPiece -> Position
+pos (PositionedPiece p _) = p
 
-createBoard :: Board
-createBoard = replicate 8 $ replicate 8 Empty
+toPos :: Piece -> Position -> PositionedPiece
+toPos p px = PositionedPiece px p
+
+piece :: PositionedPiece -> Piece
+piece (PositionedPiece _ p) = p
+
+atPos :: PositionedPiece -> Position -> Bool
+atPos = (==) . pos
+
+pieceAtPosition :: Board -> Position -> Maybe Piece
+pieceAtPosition b p = piece <$> (listToMaybe $ filter (\x -> atPos x p) b)
+
+drawPiece :: Maybe Piece -> String
+drawPiece = fromMaybe "_" . (<$>) show
+
+type Rank = Int
+type File = Int
+
+mkPiece :: Color -> Rank -> File -> PieceType -> PositionedPiece
+mkPiece c r f t = PositionedPiece (r,f) (Piece c t)
+
+board :: Board
+board = (pawns Black 6) ++  (pawns White 1) ++ (row Black 7) ++ (row White 0)
+  where
+    pawns c r = map (toPos (Piece c Pawn)) [(r,file) | file <- [0..7]]
+    row c r = [mkPiece c r 0 Rook, mkPiece c r 1 Knight, mkPiece c r 2 Bishop,
+               mkPiece c r 3 Queen, mkPiece c r 4 King,
+               mkPiece c r 5 Bishop, mkPiece c r 6 Knight, mkPiece c r 7 Rook]
 
 printBoard :: Board -> String
-printBoard b = (replicate 25 '-') ++ "\n" ++ foldl (++) "" (reverse (map printRow b))
-             where
-               printRow x = "|" ++ foldl (++) "" (map (\m -> (show m) ++ "|") x) ++ "\n" ++ (replicate 25 '-') ++ "\n"
-zipWithIndex :: [a] -> [(Int, a)]
-zipWithIndex xs = zip [0..(length xs-1)] xs
-
-placePiece :: Piece -> Board -> Position -> Board
-placePiece p board (ridx,file) = reverse $ foldl updateFile [] $ zipWithIndex board
+printBoard b = board ++ "\n"
   where
-    updateFile rows (idx, row) = if idx == file
-                                 then (updateRow row) : rows
-                                 else row : rows
-    updateRow row = reverse $ foldl updateCell [] $ zipWithIndex row
-    updateCell cells (idx, cell) = if idx == ridx
-                                   then p : cells
-                                   else cell : cells
-
-baseBoard :: Board
-baseBoard = foldl (\b f -> f b) createBoard [(placePawns Black 6),
-                                             (placePawns White 1),
-                                             placeRooks,
-                                             placeKnights,
-                                             placeBishops,
-                                             placeKingAndQueen]
-  where
-    placePawns clr rw b = foldl (placePiece (Piece clr Pawn)) b (map (\x->(x,rw)) [0..7])
-    placePieces clr pt c rw = (\x -> placePiece (Piece clr pt) x (c,rw)) .
-                              (\x -> placePiece (Piece clr pt) x (7 - c,rw))
-    placeRooks = (placePieces White Rook 0 0) . (placePieces Black Rook 0 7)
-    placeKnights = (placePieces White Knight 1 0) . (placePieces Black Knight 1 7)
-    placeBishops = (placePieces White Bishop 2 0) . (placePieces Black Bishop 2 7)
-    placeKingAndQueen = (\b -> placePiece (Piece White King) b (4,0)) .
-                        (\b -> placePiece (Piece White Queen) b (3,0)) .
-                        (\b -> placePiece (Piece Black King) b (4,7)) .
-                        (\b -> (placePiece (Piece Black Queen) b (3,7)))
+    piecesOnRank r = map (drawPiece . pieceAtPosition b . (,) r) [0..7]
+    rankString = foldl (++) "" . intersperse " " . piecesOnRank
+    rankStrings = map rankString [0..7]
+    board = foldl (++) "" $ intersperse "\n" rankStrings
