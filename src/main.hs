@@ -4,6 +4,8 @@ import Control.Applicative
 import Data.Maybe
 import Data.List
 
+-- Create board and pieces
+
 type Position = (Int,Int)
 
 data Color = Black | White deriving (Show,Eq)
@@ -37,6 +39,9 @@ atPos = (==) . pos
 pieceAtPosition :: Board -> Position -> Maybe Piece
 pieceAtPosition b p = piece <$> (listToMaybe $ filter (\x -> atPos x p) b)
 
+emptyPos :: Board -> Position -> Bool
+emptyPos b = isNothing . pieceAtPosition b
+
 drawPiece :: Maybe Piece -> String
 drawPiece = fromMaybe "_" . (<$>) show
 
@@ -61,3 +66,52 @@ printBoard b = board ++ "\n"
     rankString = foldl (++) "" . intersperse " " . piecesOnRank
     rankStrings = map rankString [0..7]
     board = foldl (++) "" $ intersperse "\n" rankStrings
+
+onBoard :: Position -> Bool
+onBoard (r,f) = r >= 0 && r < 8 && f >= 0 && f < 8
+
+-- Gameplay
+data Move = Regular PositionedPiece PositionedPiece |
+            QueensideCastle | KingsideCastle
+
+fwdBkwPart :: ([Position],[Position]) -> [[Position]]
+fwdBkwPart a = [reverse $ fst a, snd a]
+longestValidRange :: Board -> [Position] -> [Position]
+longestValidRange board = takeWhile (emptyPos board)
+
+diagRanges :: Position -> [[Position]]
+diagRanges (rank,file) = (fwdBkwPart $ partition ((< file) . snd) allPos1) ++
+                         (fwdBkwPart $ partition ((> file) . snd) allPos2)
+                         where allPos1 = filter onBoard
+                                         [(rank + i, file + i) | i <- [-7..7], i /= 0]
+                               allPos2 = filter onBoard
+                                         [(rank + i, file - i) | i <- [-7..7], i /= 0]
+
+rankRanges :: Position -> [[Position]]
+rankRanges (rank,file) = fwdBkwPart $ partition ((< file) . snd) [(rank,i) | i <- [0..7], i /= file]
+
+fileRanges :: Position -> [[Position]]
+fileRanges (rank,file) = fwdBkwPart $ partition ((< rank) . fst) [(i,file) | i <- [0..7], i /= rank]
+
+range :: (Position -> [[Position]]) -> Board -> Position -> [Position]
+range f b p = filter onBoard . concat $ map (longestValidRange board) (f p)
+
+rangeOnFile :: Board -> Position -> [Position]
+rangeOnFile board = range fileRanges board
+
+rangeOnRank :: Board -> Position -> [Position]
+rangeOnRank board = range rankRanges board
+
+rangeOnDiag :: Board -> Position -> [Position]
+rangeOnDiag board = range diagRanges board
+
+rookMoves :: Board -> Position -> [Position]
+rookMoves board p = (rangeOnFile board p) ++
+                    (rangeOnRank board p)
+
+bishopMoves :: Board -> Position -> [Position]
+bishopMoves = rangeOnDiag
+
+queenMoves :: Board -> Position -> [Position]
+queenMoves board p = bishopMoves board p ++
+                     rookMoves board p
