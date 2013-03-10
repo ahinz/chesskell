@@ -70,14 +70,27 @@ printBoard b = board ++ "\n"
 onBoard :: Position -> Bool
 onBoard (r,f) = r >= 0 && r < 8 && f >= 0 && f < 8
 
+color :: Piece -> Color
+color (Piece c _) = c
+
+sameColor :: Board -> Color -> Position -> Bool
+sameColor board c p = fromMaybe False $ (== c) <$> color <$> (pieceAtPosition board p)
+
+
 -- Gameplay
 data Move = Regular PositionedPiece PositionedPiece |
             QueensideCastle | KingsideCastle
 
 fwdBkwPart :: ([Position],[Position]) -> [[Position]]
 fwdBkwPart a = [reverse $ fst a, snd a]
+
 longestValidRange :: Board -> [Position] -> [Position]
-longestValidRange board = takeWhile (emptyPos board)
+longestValidRange board [] = []
+longestValidRange board [x] = [x]
+longestValidRange board (x0:x1:xs) = if emptyPos board x0 then
+                                       x0:(longestValidRange board (x1:xs))
+                                     else
+                                       [x0]
 
 diagRanges :: Position -> [[Position]]
 diagRanges (rank,file) = (fwdBkwPart $ partition ((< file) . snd) allPos1) ++
@@ -105,13 +118,22 @@ rangeOnRank board = range rankRanges board
 rangeOnDiag :: Board -> Position -> [Position]
 rangeOnDiag board = range diagRanges board
 
-rookMoves :: Board -> Position -> [Position]
-rookMoves board p = (rangeOnFile board p) ++
-                    (rangeOnRank board p)
+rookMoves :: Board -> Color -> Position -> [Position]
+rookMoves board c p = filter (not . sameColor board c) ((rangeOnFile board p) ++ (rangeOnRank board p))
 
-bishopMoves :: Board -> Position -> [Position]
-bishopMoves = rangeOnDiag
+bishopMoves :: Board -> Color -> Position -> [Position]
+bishopMoves board c p = filter (not . sameColor board c) (rangeOnDiag board p)
 
-queenMoves :: Board -> Position -> [Position]
-queenMoves board p = bishopMoves board p ++
-                     rookMoves board p
+queenMoves :: Board -> Color -> Position -> [Position]
+queenMoves board color p = bishopMoves board color p ++
+                           rookMoves board color p
+
+kingMoves :: Board -> Color -> Position -> [Position]
+kingMoves board c (r,f) =
+  filter (not . sameColor board c) $
+  filter onBoard [(r+1,f+1),(r+1,f),(r+1,f-1),
+                  (r  ,f+1),(r  ,f),(r  ,f-1),
+                  (r-1,f+1),(r-1,f),(r-1,f-1)]
+
+pawnMoves :: Board -> Color -> Position -> [Position]
+--pawnMoves board White (1,f) =
