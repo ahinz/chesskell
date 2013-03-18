@@ -4,6 +4,13 @@ import Data.Char
 import Control.Applicative
 import Data.Maybe
 import Data.List
+import Network
+import IO
+import Control.Monad
+import Control.Monad.Trans
+import Control.Monad.State
+import Text.Printf
+import Debug.Trace
 
 -- Create board and pieces
 
@@ -231,3 +238,69 @@ game2 = fromJust $ movesStr (Just baseBoard)
          ("e2","e4"),
          ("e7","e5"),
          ("d8","d6")]
+
+-- IRC
+host' = "asimov.freenode.net"
+host = "leguin.freenode.net"
+port = PortNumber 6666
+
+data IRCState = PreInit
+              | Preamble
+              | InRoom
+              | Error String deriving (Show, Eq)
+
+liftIt :: IO a -> StateT (IO IRCState) IO a
+liftIt = liftIO
+
+write :: Handle -> String -> String -> IO ()
+write h s t = do
+    hPrintf h "%s %s\r\n" s t
+    printf    "> %s %s\n" s t
+
+--- Just receive some info back, let's login
+nick = "adambot"
+chan = "#ahchess"
+
+processNickCommand :: String -> Handle -> IRCState -> IO IRCState
+processNickCommand st h s
+  | "quit" `isInfixOf` st = doquit
+  | otherwise = (return $ Error "Can't call me yet")
+  where
+    doquit = do
+      write h "QUIT" ""
+      return $ Error "Done"
+
+subidx sub str = findIndex (isPrefixOf sub) $ tails str
+
+handleLine :: String -> Handle -> IRCState -> IO IRCState
+handleLine' st h PreInit = do
+  write h "NICK" nick
+  write h "USER" (nick++" 0 * :tutorial bot")
+  write h "JOIN" chan
+  hFlush h
+  return Preamble
+handleLine' st h Preamble
+  | "#ahchess" `isInfixOf` st = return InRoom
+  | "433" `isInfixOf` st = return $ Error "Nickname in use"
+  | otherwise = return Preamble
+
+handleLine' st h InRoom = fromMaybe (return InRoom) $ procNick <$> subidx (":" ++ nick ++ ":") st
+  where
+    procNick i = processNickCommand (stripped i st) h InRoom
+    stripSpace = dropWhile isSpace
+    stripped i = stripSpace . (drop (i + 2 + (length nick)))
+
+-- log
+handleLine st h prevstate = trace st (handleLine' st h prevstate)
+
+doit = do
+  conn <- connectTo host port
+  listenAndReact conn (return PreInit)
+  where
+    listenAndReact :: Handle -> IO IRCState -> IO IRCState
+    listenAndReact handle st = st >>= (\state ->
+                                        case state of
+                                          Error s -> return $ Error s
+                                          _       -> listenAndReact
+                                                     handle
+                                                     ((hGetLine handle) >>= (\l -> handleLine l handle state)))
