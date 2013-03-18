@@ -1,5 +1,6 @@
 -- Main file
 import Char
+import Data.Char
 import Control.Applicative
 import Data.Maybe
 import Data.List
@@ -39,6 +40,9 @@ atPos = (==) . pos
 pieceAtPosition :: Board -> Position -> Maybe Piece
 pieceAtPosition b p = piece <$> (listToMaybe $ filter (\x -> atPos x p) b)
 
+posPieceAtPosition :: Board -> Position -> Maybe PositionedPiece
+posPieceAtPosition b p = listToMaybe $ filter (\x -> atPos x p) b
+
 emptyPos :: Board -> Position -> Bool
 emptyPos b = isNothing . pieceAtPosition b
 
@@ -51,8 +55,8 @@ type File = Int
 mkPiece :: Color -> Rank -> File -> PieceType -> PositionedPiece
 mkPiece c r f t = PositionedPiece (r,f) (Piece c t)
 
-board :: Board
-board = (pawns Black 6) ++  (pawns White 1) ++ (row Black 7) ++ (row White 0)
+baseBoard :: Board
+baseBoard = (pawns Black 6) ++  (pawns White 1) ++ (row Black 7) ++ (row White 0)
   where
     pawns c r = map (toPos (Piece c Pawn)) [(r,file) | file <- [0..7]]
     row c r = [mkPiece c r 0 Rook, mkPiece c r 1 Knight, mkPiece c r 2 Bishop,
@@ -60,12 +64,15 @@ board = (pawns Black 6) ++  (pawns White 1) ++ (row Black 7) ++ (row White 0)
                mkPiece c r 5 Bishop, mkPiece c r 6 Knight, mkPiece c r 7 Rook]
 
 printBoard :: Board -> String
-printBoard b = board ++ "\n"
+printBoard b = pfx ++ lne ++ board ++ "\n" ++ lne ++ pfx
   where
     piecesOnRank r = map (drawPiece . pieceAtPosition b . (,) r) [0..7]
     rankString = foldl (++) "" . intersperse " " . piecesOnRank
     rankStrings = map rankString [0..7]
-    board = foldl (++) "" $ intersperse "\n" rankStrings
+    prefixRanks = map (\(a,b) -> a : " | " ++ b) $ zip (map intToDigit [1..8]) rankStrings
+    board = foldl (++) "" $ intersperse "\n" prefixRanks
+    lne = "--|-----------------\n"
+    pfx = "  | a b c d e f g h\n"
 
 onBoard :: Position -> Bool
 onBoard (r,f) = r >= 0 && r < 8 && f >= 0 && f < 8
@@ -78,9 +85,6 @@ sameColor board c p = fromMaybe False $ (== c) <$> color <$> (pieceAtPosition bo
 
 
 -- Gameplay
-data Move = Regular PositionedPiece PositionedPiece |
-            QueensideCastle | KingsideCastle
-
 fwdBkwPart :: ([Position],[Position]) -> [[Position]]
 fwdBkwPart a = [reverse $ fst a, snd a]
 
@@ -107,7 +111,7 @@ fileRanges :: Position -> [[Position]]
 fileRanges (rank,file) = fwdBkwPart $ partition ((< rank) . fst) [(i,file) | i <- [0..7], i /= rank]
 
 range :: (Position -> [[Position]]) -> Board -> Position -> [Position]
-range f b p = filter onBoard . concat $ map (longestValidRange board) (f p)
+range f b p = filter onBoard $ concat $ map (longestValidRange b) (f p)
 
 rangeOnFile :: Board -> Position -> [Position]
 rangeOnFile board = range fileRanges board
@@ -117,6 +121,8 @@ rangeOnRank board = range rankRanges board
 
 rangeOnDiag :: Board -> Position -> [Position]
 rangeOnDiag board = range diagRanges board
+
+--- Specific piece moves
 
 rookMoves :: Board -> Color -> Position -> [Position]
 rookMoves board c p = filter (not . sameColor board c) ((rangeOnFile board p) ++ (rangeOnRank board p))
@@ -135,5 +141,93 @@ kingMoves board c (r,f) =
                   (r  ,f+1),(r  ,f),(r  ,f-1),
                   (r-1,f+1),(r-1,f),(r-1,f-1)]
 
+op :: Color -> Color
+op Black = White
+op White = Black
+
+knightMoves :: Board -> Color -> Position -> [Position]
+knightMoves b clr (r,c) = filter (\p -> not (sameColor b clr p)) $
+  filter onBoard
+  [(r+2,c+1),(r+2,c-1),(r+1,c+2),(r+1,c-2),
+   (r-2,c+1),(r-2,c-1),(r-1,c+2),(r-1,c-2)]
+
 pawnMoves :: Board -> Color -> Position -> [Position]
---pawnMoves board White (1,f) =
+pawnMoves board White (r,f) = lft ++ fwd ++ rght ++ dblrank
+                              where
+                                lft = if sameColor board Black (r+1,f+1) then [(r+1,f+1)] else []
+                                fwd = if emptyPos board (r+1,f) then [(r+1,f)] else []
+                                rght = if sameColor board Black (r+1,f-1) then [(r+1,f-1)] else []
+                                dblrank = if r == 1 &&
+                                             emptyPos board (r+1,f) &&
+                                             emptyPos board (r+2,f) then [(r+2,f)] else []
+
+pawnMoves board Black (r,f) = lft ++ fwd ++ rght ++ dblrank
+                              where
+                                lft = if sameColor board White (r-1,f+1) then [(r-1,f+1)] else []
+                                fwd = if emptyPos board (r-1,f) then [(r-1,f)] else []
+                                rght = if sameColor board White (r-1,f-1) then [(r-1,f-1)] else []
+                                dblrank = if r == 6 &&
+                                             emptyPos board (r-1,f) &&
+                                             emptyPos board (r-2,f) then [(r-2,f)] else []
+
+---
+
+data Move = Move PositionedPiece Position |
+            QueensideCastle | KingsideCastle
+
+moves :: Board -> PositionedPiece -> [Position]
+moves b (PositionedPiece p z@(Piece clr Rook)) = rookMoves b clr p
+moves b (PositionedPiece p z@(Piece clr Pawn)) = pawnMoves b clr p
+moves b (PositionedPiece p z@(Piece clr Knight)) = knightMoves b clr p
+moves b (PositionedPiece p z@(Piece clr Bishop)) = bishopMoves b clr p
+moves b (PositionedPiece p z@(Piece clr King)) = kingMoves b clr p
+moves b (PositionedPiece p z@(Piece clr Queen)) = queenMoves b clr p
+
+movePiece :: Board -> PositionedPiece -> Position -> Board
+movePiece b (PositionedPiece pos p) newp = newpiece : withoutnew
+                                      where
+                                        withoutold = filter (\posp -> not $ atPos posp newp) b
+                                        withoutnew = filter (\posp -> not $ atPos posp pos) b
+                                        newpiece = PositionedPiece newp p
+
+posToStr :: Position -> String
+posToStr (r,f) = [(chr $ f + 97), intToDigit (r + 1)]
+
+strToPos :: String -> Position
+strToPos [f, r] = (-1 + digitToInt r, -97 + ord f)
+
+query :: Board -> String -> String
+query b p = fromMaybe "" $ show <$> pieceAtPosition b (strToPos p)
+
+move :: Board -> Move -> Maybe Board
+move b (Move p1 p2) = if elem p2 $ moves b p1 then
+                        Just $ movePiece b p1 p2
+                      else
+                        Nothing
+
+moveStr :: Board -> String -> String -> Maybe Board
+moveStr b p1 p2 = do
+  piece <- posPieceAtPosition b (strToPos p1)
+  newBoard <- move b (Move piece (strToPos p2))
+  return newBoard
+
+movesStr :: Maybe Board -> [(String, String)] -> Maybe Board
+movesStr Nothing xs = Nothing
+movesStr b [] = b
+movesStr (Just b) ((p1,p2) : xs) = movesStr (moveStr b p1 p2) xs
+
+game :: Maybe Board
+game = do
+  b1 <- moveStr baseBoard "d2" "d4"
+  b2 <- moveStr b1 "d7" "d5"
+  b3 <- moveStr b2 "e2" "e4"
+  b4 <- moveStr b3 "e7" "e5"
+  b5 <- moveStr b4 "e4" "d5"
+  return b5
+
+game2 = fromJust $ movesStr (Just baseBoard)
+        [("d2","d4"),
+         ("d7","d5"),
+         ("e2","e4"),
+         ("e7","e5"),
+         ("d8","d6")]
